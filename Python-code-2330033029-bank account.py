@@ -43,7 +43,7 @@ class DatabaseManager:
                                     total_deposits REAL DEFAULT 0,
                                     loan_total REAL DEFAULT 0,
                                     balance REAL DEFAULT 0,
-                                    last_login TEXT
+                                    last_interest_update_time TEXT
                                   )''')
 
                 cursor.execute('''CREATE TABLE IF NOT EXISTS transactions (
@@ -103,7 +103,7 @@ class DatabaseManager:
         try:
             with self.conn:
                 cursor = self.conn.cursor()
-                cursor.execute("""INSERT INTO users (name, email, password_hash, phone, daily_limit, total_deposits, loan_total, balance, last_login) 
+                cursor.execute("""INSERT INTO users (name, email, password_hash, phone, daily_limit, total_deposits, loan_total, balance, last_interest_update_time) 
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                                (name, email, password_hash, phone, daily_limit, total_deposits, loan_total, balance, datetime.now().isoformat()))
                 user_id = cursor.lastrowid
@@ -287,20 +287,21 @@ class DatabaseManager:
                 for user_data in all_users:
                     user_id = user_data[0]
                     balance = user_data[8]
-                    last_login = user_data[9]
+                    last_interest_update_time = user_data[9]
 
-                    if not last_login:
-                        self.update_user_info(user_id, last_login=datetime.now().isoformat())
+                    # 如果没有上次计息时间，则不计算本次利息，只设定基准点
+                    if not last_interest_update_time:
+                        self.update_user_info(user_id, last_interest_update_time=datetime.now().isoformat())
                         continue
 
-                    last_login_time = datetime.fromisoformat(last_login)
+                    last_update_time = datetime.fromisoformat(last_interest_update_time)
                     now = datetime.now()
-                    delta_days = (now.date() - last_login_time.date()).days
+                    delta_days = (now.date() - last_update_time.date()).days
                     if delta_days <= 0:
                         continue
 
                     all_transactions = self.get_transactions(user_id)
-                    filtered_transactions = [t for t in all_transactions if datetime.fromisoformat(t[4]) > last_login_time]
+                    filtered_transactions = [t for t in all_transactions if datetime.fromisoformat(t[4]) > last_update_time]
 
                     daily_transactions = {}
                     for tx in filtered_transactions:
@@ -308,7 +309,7 @@ class DatabaseManager:
                         daily_transactions.setdefault(tx_date, 0)
                         daily_transactions[tx_date] += tx[2]
 
-                    current_date = last_login_time.date()
+                    current_date = last_update_time.date()
                     current_balance = balance
                     cursor = self.conn.cursor()
 
@@ -325,7 +326,7 @@ class DatabaseManager:
                         logging.info(f"Applied interest for user ID {user_id} on {current_date}: {interest_gained:.2f}")
 
                     self.update_user_balance(user_id, current_balance)
-                    self.update_user_info(user_id, last_login=now.isoformat())
+                    self.update_user_info(user_id, last_interest_update_time=now.isoformat())
 
                 self.conn.commit()
                 logging.info("All users' interest updated successfully.")
@@ -394,7 +395,7 @@ class UserAccount:
         self.total_deposits = user_data[6]
         self.loan_total = user_data[7]
         self.balance = user_data[8]
-        self.last_login = user_data[9]
+        self.last_interest_update_time = user_data[9]
         logging.info(f"Initialized UserAccount for user ID {self.user_id}.")
 
     @staticmethod
@@ -790,7 +791,6 @@ class MainWindow:
         style.configure('Section.TLabelframe', font=('Arial', 12, 'bold'), foreground='#333333')
         style.configure('TButton', font=('Arial', 10))
 
-        # Create a canvas and a scrollbar
         canvas = tk.Canvas(self.root)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
